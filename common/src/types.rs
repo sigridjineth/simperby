@@ -8,6 +8,8 @@ pub type Timestamp = i64;
 pub type BlockHeight = u64;
 pub type ConsensusRound = u64;
 pub type FinalizationProof = Vec<TypedSignature<BlockHeader>>;
+pub type DelegationSignature = TypedSignature<DelegationTransactionData>;
+pub type DelegationTransactionData = (PublicKey, PublicKey, bool, BlockHeight);
 pub type MemberName = String;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
@@ -20,10 +22,10 @@ pub struct Member {
     pub consensus_voting_power: VotingPower,
     /// If this member delegated its governance voting power to another member,
     /// the delegatee.
-    pub governance_delegations: Option<MemberName>,
+    pub governance_delegatee: Option<MemberName>,
     /// If this member delegated its governance consensus power to another member,
     /// the delegatee.
-    pub consensus_delegations: Option<MemberName>,
+    pub consensus_delegatee: Option<MemberName>,
     // TODO: add various conditions for each delegation.
     // - Unlock-Automatically-After-N-Blocks
     // - Unlock-Automatically-After-T-Seconds
@@ -119,7 +121,7 @@ pub struct TxDelegate {
     pub delegatee: PublicKey,
     /// Whether to delegate the governance voting power too.
     pub governance: bool,
-    pub proof: TypedSignature<(PublicKey, PublicKey, bool, BlockHeight)>,
+    pub proof: DelegationSignature,
     pub timestamp: Timestamp,
 }
 
