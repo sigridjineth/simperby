@@ -52,10 +52,15 @@ impl ReservedState {
                     .or_insert(member.consensus_voting_power);
             }
         }
-        Ok(validator_set
-            .iter()
-            .map(|(name, voting_power)| (self.query_public_key(name).unwrap(), *voting_power))
-            .collect())
+        let mut result = Vec::new();
+        for (name, voting_power) in validator_set {
+            match self.query_public_key(&name) {
+                Some(public_key) => result.push((public_key, voting_power)),
+                None => return Err("validator does not exist by name".to_string()),
+            }
+        }
+        result.sort_by(|a, b| b.0.cmp(&a.0));
+        Ok(result)
     }
 
     pub fn get_governance_set(&self) -> Result<Vec<(PublicKey, VotingPower)>, String> {
@@ -73,10 +78,15 @@ impl ReservedState {
                     .or_insert(member.consensus_voting_power);
             }
         }
-        Ok(governance_set
-            .iter()
-            .map(|(name, voting_power)| (self.query_public_key(name).unwrap(), *voting_power))
-            .collect())
+        let mut result = Vec::new();
+        for (name, voting_power) in governance_set {
+            match self.query_public_key(&name) {
+                Some(public_key) => result.push((public_key, voting_power)),
+                None => return Err("validator does not exist by name".to_string()),
+            }
+        }
+        result.sort_by(|a, b| b.0.cmp(&a.0));
+        Ok(result)
     }
 
     pub fn apply_delegate(&mut self, tx: &TxDelegate) -> Result<Self, String> {
