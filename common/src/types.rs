@@ -10,6 +10,20 @@ pub type ConsensusRound = u64;
 pub type FinalizationProof = Vec<TypedSignature<BlockHeader>>;
 pub type MemberName = String;
 
+#[derive(Debug, Serialize, Deserialize, Clone, Hash, Eq, PartialEq)]
+pub struct DelegationTransactionData {
+    pub delegator: PublicKey,
+    pub delegatee: PublicKey,
+    pub governance: bool,
+    pub timestamp: BlockHeight,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Hash, Eq, PartialEq)]
+pub struct UndelegationTransactionData {
+    pub delegator: PublicKey,
+    pub timestamp: BlockHeight,
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct Member {
     pub public_key: PublicKey,
@@ -133,20 +147,6 @@ pub struct TxUndelegate {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct TxReport {
     // TODO
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub struct DelegationTransactionData {
-    pub delegator: PublicKey,
-    pub delegatee: PublicKey,
-    pub governance: bool,
-    pub block_height: BlockHeight,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub struct UndelegationTransactionData {
-    pub delegator: PublicKey,
-    pub block_height: BlockHeight,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
