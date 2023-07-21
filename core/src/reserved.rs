@@ -157,6 +157,7 @@ mod tests {
             consensus_voting_power: 1,
             governance_delegatee: None,
             consensus_delegatee: None,
+            expelled: false,
         }
     }
 
@@ -172,6 +173,7 @@ mod tests {
             consensus_voting_power: 1,
             governance_delegatee: None,
             consensus_delegatee: Some(format!("member-{delegatee_member_num:04}")),
+            expelled: false,
         }
     }
 
@@ -187,6 +189,7 @@ mod tests {
             consensus_voting_power: 1,
             governance_delegatee: Some(format!("member-{delegatee_member_num:04}")),
             consensus_delegatee: None,
+            expelled: false,
         }
     }
 
