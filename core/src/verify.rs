@@ -176,27 +176,27 @@ impl CommitSequenceVerifier {
     }
 
     /// Verifies whether the given reserved state is valid from the current state.
-    pub fn verify_reserved_state(&self, _rs: &ReservedState) -> Result<(), Error> {
+    pub fn verify_reserved_state(&self, rs: &ReservedState) -> Result<(), Error> {
         // Check that the number of members is at least 4.
-        if _rs.members.len() < 4 {
+        if rs.members.len() < 4 {
             return Err(Error::InvalidArgument(
                 "the number of members is less than 4".to_string(),
             ));
         }
         // Check that `consensus_leader_order` is correct.
-        let mut leader_names = _rs
+        let mut leader_names = rs
             .members
             .iter()
             .map(|m| m.name.clone())
             .collect::<Vec<_>>();
         leader_names.sort();
-        if leader_names != _rs.consensus_leader_order {
+        if leader_names != rs.consensus_leader_order {
             return Err(Error::InvalidArgument(
                 "consensus_leader_order is incorrect".to_string(),
             ));
         }
         // Check that `genesis_info` stays the same.
-        if _rs.genesis_info != self.reserved_state.genesis_info {
+        if rs.genesis_info != self.reserved_state.genesis_info {
             return Err(Error::InvalidArgument("genesis_info changes".to_string()));
         }
         // Check that the newly added (if exists) `Member::name` is unique.
@@ -206,12 +206,12 @@ impl CommitSequenceVerifier {
             .iter()
             .map(|m| &m.name)
             .collect::<HashSet<_>>();
-        for member in &_rs.members {
+        for member in &rs.members {
             if !existing_names.contains(&member.name)
-                && _rs.members.iter().filter(|m| m.name == member.name).count() > 1
+                && rs.members.iter().filter(|m| m.name == member.name).count() > 1
             {
                 return Err(Error::InvalidArgument(format!(
-                    "Member name '{}' already exists",
+                    "member name '{}' already exists",
                     member.name
                 )));
             }
@@ -223,15 +223,29 @@ impl CommitSequenceVerifier {
             .iter()
             .map(|m| m.public_key.clone())
             .collect::<HashSet<_>>();
-        for member in &_rs.members {
+        for member in &rs.members {
             if existing_members.contains(&member.public_key) && member.expelled {
                 return Err(Error::InvalidArgument(format!(
-                    "Member '{}' cannot be expelled",
+                    "member '{}' cannot be expelled",
                     member.name
                 )));
             }
         }
         // Check that the delegation state doesn't change.
+        if rs.members.iter().any(|m| m.governance_delegatee.is_some())
+            && rs.members != self.reserved_state.members
+        {
+            return Err(Error::InvalidArgument(
+                "governance_delegatee cannot be changed".to_string(),
+            ));
+        }
+        if rs.members.iter().any(|m| m.consensus_delegatee.is_some())
+            && rs.members != self.reserved_state.members
+        {
+            return Err(Error::InvalidArgument(
+                "consensus_delegatee cannot be changed".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -1559,9 +1573,9 @@ mod test {
 
     #[test]
     fn test_verify_reserved_state_expelled_member() {
-        // Given: Configuration for the test
+        // configuring the test
         let (mut validator_keypair, mut reserved_state, csv) = setup_test(4);
-        // Given: Adding a new member
+        // adding a new member that will be expelled
         validator_keypair.push(generate_keypair([5]));
         let new_expelled_member = Member {
             public_key: validator_keypair.last().unwrap().0.clone(),
@@ -1574,12 +1588,12 @@ mod test {
         };
         reserved_state.members.push(new_expelled_member);
 
-        // When: New reserved state with same members but one is expelled
+        // rendering the reserved state that is expected to be invalid
         let invalid_rs = reserved_state.clone();
 
         assert!(csv.verify_reserved_state(&invalid_rs).is_err());
 
-        // When: New reserved state with expelled member removed
+        // rendering the reserved state that is expected to be valid after removing the expelled member
         let mut valid_rs = reserved_state.clone();
         valid_rs.members.retain(|m| !m.clone().expelled);
 
@@ -1588,9 +1602,9 @@ mod test {
 
     #[test]
     fn test_verify_reserved_state_non_expelled_member() {
-        // Given: Configuration for the test
+        // configuring the test
         let (mut validator_keypair, mut reserved_state, csv) = setup_test(4);
-        // Given: Adding a new member
+        // adding a new member that will NOT be expelled
         validator_keypair.push(generate_keypair([5]));
         let new_expelled_member = Member {
             public_key: validator_keypair.last().unwrap().0.clone(),
@@ -1606,7 +1620,7 @@ mod test {
             .consensus_leader_order
             .push(new_expelled_member.name);
 
-        // When: New reserved state with same members but one is NOT expelled
+        // rendering new reserved state that is expected to be valid with a non-expelled new member
         let invalid_rs = reserved_state.clone();
 
         assert!(csv.verify_reserved_state(&invalid_rs).is_ok());
