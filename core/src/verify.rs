@@ -297,6 +297,7 @@ impl CommitSequenceVerifier {
             (Commit::Transaction(tx), Phase::Block) => {
                 // Update reserved_state for reserved-diff transactions.
                 if let Diff::Reserved(rs) = &tx.diff {
+                    self.verify_reserved_state(rs)?;
                     self.reserved_state = *rs.clone();
                 }
                 self.phase = Phase::Transaction {
@@ -320,6 +321,7 @@ impl CommitSequenceVerifier {
                 }
                 // Update reserved_state for reserved-diff transactions.
                 if let Diff::Reserved(rs) = &tx.diff {
+                    self.verify_reserved_state(rs)?;
                     self.reserved_state = *rs.clone();
                 }
                 let mut preceding_transactions = preceding_transactions.clone();
