@@ -231,21 +231,6 @@ impl CommitSequenceVerifier {
                 )));
             }
         }
-        // Check that the delegation state doesn't change.
-        if rs.members.iter().any(|m| m.governance_delegatee.is_some())
-            && rs.members != self.reserved_state.members
-        {
-            return Err(Error::InvalidArgument(
-                "governance_delegatee cannot be changed".to_string(),
-            ));
-        }
-        if rs.members.iter().any(|m| m.consensus_delegatee.is_some())
-            && rs.members != self.reserved_state.members
-        {
-            return Err(Error::InvalidArgument(
-                "consensus_delegatee cannot be changed".to_string(),
-            ));
-        }
         Ok(())
     }
 
