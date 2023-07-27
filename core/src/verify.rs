@@ -184,13 +184,27 @@ impl CommitSequenceVerifier {
             ));
         }
         // Check that `consensus_leader_order` is correct.
-        let mut leader_names = rs
+        // 1. consensus_leader_order should be the subset of members.
+        // 2. every consensus leader should not be expelled.
+        // 3. consensus_leader_order should consist of more than 1 unique member names to avoid a SPoF.
+        let valid_leader_candidates: Vec<MemberName> = rs
             .members
             .iter()
+            .filter(|m| !m.expelled)
             .map(|m| m.name.clone())
-            .collect::<Vec<_>>();
-        leader_names.sort();
-        if leader_names != rs.consensus_leader_order {
+            .collect();
+        if !rs
+            .consensus_leader_order
+            .iter()
+            .all(|l| valid_leader_candidates.contains(l))
+            && rs
+                .consensus_leader_order
+                .iter()
+                .cloned()
+                .collect::<HashSet<MemberName>>()
+                .len()
+                > 1
+        {
             return Err(Error::InvalidArgument(
                 "consensus_leader_order is incorrect".to_string(),
             ));
@@ -199,35 +213,34 @@ impl CommitSequenceVerifier {
         if rs.genesis_info != self.reserved_state.genesis_info {
             return Err(Error::InvalidArgument("genesis_info changes".to_string()));
         }
-        // Check that the newly added (if exists) `Member::name` is unique.
-        let existing_names = self
-            .reserved_state
-            .members
-            .iter()
-            .map(|m| &m.name)
-            .collect::<HashSet<_>>();
+        // Check that `Member::name` and `Member::public_key` are unique.
         for member in &rs.members {
-            if !existing_names.contains(&member.name)
-                && rs.members.iter().filter(|m| m.name == member.name).count() > 1
-            {
+            if rs.members.iter().filter(|m| m.name == member.name).count() > 1 {
                 return Err(Error::InvalidArgument(format!(
                     "member name '{}' already exists",
                     member.name
                 )));
             }
+            if rs
+                .members
+                .iter()
+                .filter(|m| m.public_key == member.public_key)
+                .count()
+                > 1
+            {
+                return Err(Error::InvalidArgument(format!(
+                    "the public key of '{}' already exists",
+                    member.name
+                )));
+            }
         }
         // Check that `member` monotonically increases (refer to `Member::expelled`).
-        let existing_members = self
-            .reserved_state
-            .members
-            .iter()
-            .map(|m| m.public_key.clone())
-            .collect::<HashSet<_>>();
-        for member in &rs.members {
-            if existing_members.contains(&member.public_key) && member.expelled {
+        let member_names: HashSet<String> = rs.members.iter().map(|m| m.name.clone()).collect();
+        for existing_member in &self.reserved_state.members {
+            if !member_names.contains(&existing_member.name) {
                 return Err(Error::InvalidArgument(format!(
-                    "member '{}' cannot be expelled",
-                    member.name
+                    "{} doesn't not exist in members",
+                    &existing_member.name
                 )));
             }
         }
@@ -651,19 +664,18 @@ mod test {
         time: Timestamp,
     ) -> Commit {
         // Update reserved reserved_state
-        validator_keypair.push(generate_keypair([3]));
+        validator_keypair.push(generate_keypair([4]));
+        let new_member_name = format!("member{}", validator_keypair.len() - 1);
         reserved_state.members.push(Member {
             public_key: validator_keypair.last().unwrap().0.clone(),
-            name: format!("member{}", validator_keypair.len()),
+            name: new_member_name.clone(),
             governance_voting_power: 1,
             consensus_voting_power: 1,
             governance_delegatee: None,
             consensus_delegatee: None,
             expelled: false,
         });
-        reserved_state
-            .consensus_leader_order
-            .push("Dave".to_string());
+        reserved_state.consensus_leader_order.push(new_member_name);
         reserved_state.consensus_leader_order.sort();
         Commit::Transaction(Transaction {
             author: "doesn't matter".to_owned(),
@@ -1559,58 +1571,148 @@ mod test {
     }
 
     #[test]
-    fn test_verify_reserved_state_expelled_member() {
-        // configuring the test
-        let (mut validator_keypair, mut reserved_state, csv) = setup_test(4);
-        // adding a new member that will be expelled
-        validator_keypair.push(generate_keypair([5]));
-        let new_expelled_member = Member {
-            public_key: validator_keypair.last().unwrap().0.clone(),
-            name: "new_expelled_member".to_string(),
-            governance_voting_power: 1,
-            consensus_voting_power: 1,
-            governance_delegatee: None,
-            consensus_delegatee: None,
-            expelled: true,
-        };
-        reserved_state.members.push(new_expelled_member);
-
-        // rendering the reserved state that is expected to be invalid
-        let invalid_rs = reserved_state.clone();
-
-        assert!(csv.verify_reserved_state(&invalid_rs).is_err());
-
-        // rendering the reserved state that is expected to be valid after removing the expelled member
-        let mut valid_rs = reserved_state.clone();
-        valid_rs.members.retain(|m| !m.clone().expelled);
-
-        assert!(csv.verify_reserved_state(&valid_rs).is_ok());
+    /// Test the case where the member count of reserved state is less than 4.
+    fn invalid_reserved_state_with_too_few_members() {
+        // set validator_set_size to 3
+        let (_, reserved_state, mut csv) = setup_test(3);
+        // Apply reserved-diff commit to verify the reserved state
+        csv.apply_commit(&Commit::Transaction(Transaction {
+            author: "doesn't matter".to_owned(),
+            timestamp: 3,
+            head: "Test reserved-diff commit".to_string(),
+            body: String::new(),
+            diff: Diff::Reserved(Box::new(reserved_state)),
+        }))
+        .unwrap_err();
     }
 
     #[test]
-    fn test_verify_reserved_state_non_expelled_member() {
-        // configuring the test
-        let (mut validator_keypair, mut reserved_state, csv) = setup_test(4);
-        // adding a new member that will NOT be expelled
-        validator_keypair.push(generate_keypair([5]));
-        let new_expelled_member = Member {
+    /// Test the case where a consensus leader is not the one of members.
+    fn invalid_reserved_state_with_consensus_leader_not_in_members() {
+        let (_, mut reserved_state, mut csv) = setup_test(4);
+        // Add a member name that is not the one of members' names to consensus_leader_order
+        reserved_state
+            .consensus_leader_order
+            .push("stranger".to_string());
+        // Apply reserved-diff commit to verify the reserved state
+        csv.apply_commit(&Commit::Transaction(Transaction {
+            author: "doesn't matter".to_owned(),
+            timestamp: 3,
+            head: "Test reserved-diff commit".to_string(),
+            body: String::new(),
+            diff: Diff::Reserved(Box::new(reserved_state.clone())),
+        }))
+        .unwrap_err();
+    }
+
+    #[test]
+    /// Test the case where the genesis info is changed.
+    fn invalid_reserved_state_with_changed_genesis_info() {
+        let (validator_keypair, mut reserved_state, mut csv) = setup_test(4);
+        // Generate a new genesis header with different author_index
+        let author_index = 1;
+        let new_genesis_header: BlockHeader = BlockHeader {
+            author: validator_keypair[author_index].0.clone(),
+            prev_block_finalization_proof: FinalizationProof::genesis(),
+            previous_hash: Hash256::zero(),
+            height: 0,
+            timestamp: 0,
+            commit_merkle_root: OneshotMerkleTree::create(vec![]).root(),
+            repository_merkle_root: Hash256::zero(),
+            validator_set: validator_keypair
+                .iter()
+                .map(|(public_key, _)| (public_key.clone(), 1))
+                .collect(),
+            version: SIMPERBY_CORE_PROTOCOL_VERSION.to_string(),
+        };
+        // Change genesis info of the reserved state
+        reserved_state.genesis_info = GenesisInfo {
+            header: new_genesis_header.clone(),
+            genesis_proof: generate_unanimous_finalization_proof(
+                &validator_keypair,
+                &new_genesis_header,
+                0,
+            ),
+            chain_name: "PDAO Chain".to_string(),
+        };
+        // Apply reserved-diff commit to verify the reserved state
+        csv.apply_commit(&Commit::Transaction(Transaction {
+            author: "doesn't matter".to_owned(),
+            timestamp: 3,
+            head: "Test reserved-diff commit".to_string(),
+            body: String::new(),
+            diff: Diff::Reserved(Box::new(reserved_state)),
+        }))
+        .unwrap_err();
+    }
+
+    #[test]
+    /// Test the case where there is a duplicate member name.
+    fn invalid_reserved_state_with_duplicate_member_name() {
+        let (mut validator_keypair, mut reserved_state, mut csv) = setup_test(4);
+        // Generate a new member with duplicate name
+        validator_keypair.push(generate_keypair([4]));
+        reserved_state.members.push(Member {
             public_key: validator_keypair.last().unwrap().0.clone(),
-            name: "new_non_expelled_member".to_string(),
+            name: "member0".to_string(), // duplicate name
             governance_voting_power: 1,
             consensus_voting_power: 1,
             governance_delegatee: None,
             consensus_delegatee: None,
             expelled: false,
-        };
-        reserved_state.members.push(new_expelled_member.clone());
-        reserved_state
-            .consensus_leader_order
-            .push(new_expelled_member.name);
+        });
+        // Apply reserved-diff commit to verify the reserved state
+        csv.apply_commit(&Commit::Transaction(Transaction {
+            author: "doesn't matter".to_owned(),
+            timestamp: 3,
+            head: "Test reserved-diff commit".to_string(),
+            body: String::new(),
+            diff: Diff::Reserved(Box::new(reserved_state.clone())),
+        }))
+        .unwrap_err();
+    }
 
-        // rendering new reserved state that is expected to be valid with a non-expelled new member
-        let invalid_rs = reserved_state.clone();
+    #[test]
+    /// Test the case where there is a duplicate public key.
+    fn invalid_reserved_state_with_duplicate_public_key() {
+        let (validator_keypair, mut reserved_state, mut csv) = setup_test(4);
+        // Generate a new member with duplicate public key
+        reserved_state.members.push(Member {
+            public_key: validator_keypair[0].0.clone(), // duplicate public key
+            name: format!("member{}", validator_keypair.len() - 1),
+            governance_voting_power: 1,
+            consensus_voting_power: 1,
+            governance_delegatee: None,
+            consensus_delegatee: None,
+            expelled: false,
+        });
+        // Apply reserved-diff commit to verify the reserved state
+        csv.apply_commit(&Commit::Transaction(Transaction {
+            author: "doesn't matter".to_owned(),
+            timestamp: 3,
+            head: "Test reserved-diff commit".to_string(),
+            body: String::new(),
+            diff: Diff::Reserved(Box::new(reserved_state.clone())),
+        }))
+        .unwrap_err();
+    }
 
-        assert!(csv.verify_reserved_state(&invalid_rs).is_ok());
+    #[test]
+    /// Test the case where the member names don't monotonically increase.
+    fn invalid_reserved_state_with_non_monotonic_increased_member_names() {
+        let (_, mut reserved_state, mut csv) = setup_test(5);
+        // Remove one from members instead of setting Member::expelled to true
+        reserved_state.members.pop();
+        reserved_state.consensus_leader_order.pop();
+        // Apply reserved-diff commit to verify the reserved state
+        csv.apply_commit(&Commit::Transaction(Transaction {
+            author: "doesn't matter".to_owned(),
+            timestamp: 3,
+            head: "Test reserved-diff commit".to_string(),
+            body: String::new(),
+            diff: Diff::Reserved(Box::new(reserved_state.clone())),
+        }))
+        .unwrap_err();
     }
 
     #[ignore]
