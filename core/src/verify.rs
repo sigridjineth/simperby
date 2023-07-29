@@ -1650,8 +1650,6 @@ mod test {
         assert!(csv.verify_reserved_state(&invalid_rs).is_ok());
     }
 
-<<<<<<< HEAD
-=======
     #[test]
     fn test_verify_reserved_state_version_advance() {
         // configuring the test
@@ -1664,7 +1662,6 @@ mod test {
         assert!(csv.verify_reserved_state(&valid_rs).is_ok());
     }
 
->>>>>>> 5301f36 (add checking version about semver and test code)
     #[ignore]
     #[test]
     /// Test the case where the agenda proof commit is invalid because it is extra-agenda transaction phase.
