@@ -249,25 +249,32 @@ impl CommitSequenceVerifier {
             ));
         }
 
-        let previous_version = Version::parse(&self.reserved_state.version);
+        let current_version = Version::parse(&self.reserved_state.version);
         let new_version = Version::parse(&rs.version);
-        
-        match (previous_version, new_version) {
-            (Ok(previous_version), Ok(new_version)) => {
-                if previous_version != new_version {
-                    let requirement =
-                        VersionReq::parse(&format!("> {}", previous_version)).unwrap();
-                    if !requirement.matches(&new_version) {
-                        return Err(Error::InvalidArgument(format!(
-                            "Version advances is incorrect"
-                        )));
+
+        match (current_version, new_version) {
+            (Ok(current_version), Ok(new_version)) => {
+                if current_version != new_version {
+                    match VersionReq::parse(&format!("> {}", current_version)) {
+                        Ok(requirement) => {
+                            if !requirement.matches(&new_version) {
+                                return Err(Error::InvalidArgument(
+                                    "Version advances is incorrect".to_string(),
+                                ));
+                            }
+                        }
+                        Err(_) => {
+                            return Err(Error::InvalidArgument(
+                                "Failed to create version requirement".to_string(),
+                            ));
+                        }
                     }
                 }
             }
             _ => {
-                return Err(Error::InvalidArgument(format!(
-                    "One or both versions are not valid SemVer"
-                )))
+                return Err(Error::InvalidArgument(
+                    "One or both versions are not valid semver format".to_string(),
+                ))
             }
         }
         Ok(())
@@ -1656,7 +1663,7 @@ mod test {
         let (mut _validator_keypair, reserved_state, csv) = setup_test(4);
 
         // rendering the reserved state that is expected to be valid
-        let mut valid_rs = reserved_state.clone();
+        let mut valid_rs = reserved_state;
         valid_rs.version = "1.1.0".to_string(); // set a version that is greater than the previous version
 
         assert!(csv.verify_reserved_state(&valid_rs).is_ok());
