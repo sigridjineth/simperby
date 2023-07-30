@@ -186,27 +186,31 @@ impl CommitSequenceVerifier {
         // Check that `consensus_leader_order` is correct.
         // 1. consensus_leader_order should be the subset of members.
         // 2. every consensus leader should not be expelled.
-        // 3. consensus_leader_order should consist of more than 1 unique member names to avoid a SPoF.
-        let valid_leader_candidates: Vec<MemberName> = rs
+        // 3. consensus_leader_order should consist of more than 1 unique members to avoid a SPoF.
+        let valid_leader_candidates: HashSet<&MemberName> = rs
             .members
             .iter()
             .filter(|m| !m.expelled)
-            .map(|m| m.name.clone())
+            .map(|m| &m.name)
             .collect();
         if !rs
             .consensus_leader_order
             .iter()
-            .all(|l| valid_leader_candidates.contains(l))
-            && rs
-                .consensus_leader_order
-                .iter()
-                .cloned()
-                .collect::<HashSet<MemberName>>()
-                .len()
-                > 1
+            .all(|m| valid_leader_candidates.contains(m))
         {
             return Err(Error::InvalidArgument(
-                "consensus_leader_order is incorrect".to_string(),
+                "Some consensus leaders are not valid candidates".to_string(),
+            ));
+        }
+        if rs
+            .consensus_leader_order
+            .iter()
+            .collect::<HashSet<&MemberName>>()
+            .len()
+            <= 1
+        {
+            return Err(Error::InvalidArgument(
+                "consensus_leader_order should consist of more than 1 unique members".to_string(),
             ));
         }
         // Check that `genesis_info` stays the same.
@@ -214,20 +218,16 @@ impl CommitSequenceVerifier {
             return Err(Error::InvalidArgument("genesis_info changes".to_string()));
         }
         // Check that `Member::name` and `Member::public_key` are unique.
+        let mut member_names = HashSet::new();
+        let mut public_keys = HashSet::new();
         for member in &rs.members {
-            if rs.members.iter().filter(|m| m.name == member.name).count() > 1 {
+            if !member_names.insert(&member.name) {
                 return Err(Error::InvalidArgument(format!(
                     "member name '{}' already exists",
                     member.name
                 )));
             }
-            if rs
-                .members
-                .iter()
-                .filter(|m| m.public_key == member.public_key)
-                .count()
-                > 1
-            {
+            if !public_keys.insert(&member.public_key) {
                 return Err(Error::InvalidArgument(format!(
                     "the public key of '{}' already exists",
                     member.name
@@ -235,6 +235,7 @@ impl CommitSequenceVerifier {
             }
         }
         // Check that `member` monotonically increases (refer to `Member::expelled`).
+        // Once a member is added, it cannot be removed, even if it is expelled.
         let member_names: HashSet<String> = rs.members.iter().map(|m| m.name.clone()).collect();
         for existing_member in &self.reserved_state.members {
             if !member_names.contains(&existing_member.name) {
@@ -1601,6 +1602,23 @@ mod test {
             head: "Test reserved-diff commit".to_string(),
             body: String::new(),
             diff: Diff::Reserved(Box::new(reserved_state.clone())),
+        }))
+        .unwrap_err();
+    }
+
+    #[test]
+    /// Test the case where an expelled member is included in the consensus leader order.
+    fn invalid_reserved_state_with_expelled_member_in_consensus_leader_order() {
+        let (_, mut reserved_state, mut csv) = setup_test(4);
+        // Expel the first member
+        reserved_state.members[0].expelled = true;
+        // Apply reserved-diff commit to verify the reserved state
+        csv.apply_commit(&Commit::Transaction(Transaction {
+            author: "doesn't matter".to_owned(),
+            timestamp: 3,
+            head: "Test reserved-diff commit".to_string(),
+            body: String::new(),
+            diff: Diff::Reserved(Box::new(reserved_state)),
         }))
         .unwrap_err();
     }
